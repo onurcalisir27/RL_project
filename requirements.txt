@@ -1,7 +1,9 @@
 tensorflow
 robosuite
+robosuite_models
 numpy
 scipy
 tqdm
 pyyaml
 tensorboard
+hydra-core
