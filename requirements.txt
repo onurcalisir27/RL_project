@@ -1,5 +1,5 @@
 tensorflow
-robosuite
+robosuite==1.4.1
 robosuite_models
 numpy
 scipy
