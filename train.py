@@ -1,21 +1,21 @@
 import numpy as np
+import gym
 import datetime
-from tensorboardX import SummaryWriter
+from torch.utils.tensorboard import SummaryWriter
 import robosuite as suite
-from robosuite.controllers import load_composite_controller_config
+from robosuite.controllers import load_controller_config
 import pickle
 from tqdm import tqdm
 from scipy.spatial.transform import Rotation as R
 import time
-import os
+import os, sys
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 from memory import MyMemory
 from method import Method
-import json
 
-# Remove the registration since we'll use the built-in controller
-# REGISTERED_COMPOSITE_CONTROLLERS_DICT["OSC_POSITION"] = OperationalSpaceController
 
-class Train:
+class train:
     def __init__(self, config):
         self.config = config
         self.env = config['task']['name']
@@ -23,7 +23,7 @@ class Train:
         self.render = config['render']
         self.n_inits = config['n_inits']
         self.run_name = config['run_name']
-        self.object = None if config['object'] == '' else config['object']
+        self.object = None if config['object']=='' else config['object']
 
         self.robot = config['task']['env']['robot']
         self.state_dim = config['task']['env']['state_dim']
@@ -37,18 +37,20 @@ class Train:
 
         self.train()
 
+
+    
     def reset_env(self, env, get_objs=False):
         obs = env.reset()
         if get_objs:
             if self.env == 'Lift':
                 objs = obs['cube_pos']
             elif self.env == 'Stack':
-                objs = np.concatenate((obs['cubeA_pos'], obs['cubeB_pos']), axis=-1)
+                objs = np.concatenate((obs['cubeA_pos'], obs['cubeB_pos']), axis=-1) 
             elif self.env == 'NutAssembly':
                 nut = 'RoundNut'
                 objs = obs[nut + '_pos']
             elif self.env == 'PickPlace':
-                objs = obs[self.object + '_pos']
+                objs = obs[self.object+'_pos']
             elif self.env == 'Door':
                 objs = np.concatenate((obs['door_pos'], obs['handle_pos']), axis=-1)
             return obs, objs
@@ -60,17 +62,19 @@ class Train:
             robot_ang = R.from_quat(obs['robot0_eef_quat']).as_euler('xyz', degrees=False)
             state = np.concatenate((robot_pos, robot_ang), axis=-1)
             return state
+
         state = obs['robot0_eef_pos']
         return state
 
     def get_action(self, env, wp_idx, state, traj_mat, gripper_mat, time_s, timestep):
         error = traj_mat[wp_idx, :] - state
         if timestep < 10:
-            full_action = np.array(list(10. * error) + [0.] * (6 - len(state)) + [-1.])
+            full_action = np.array(list(10.*error) + [0.]*(6-len(state)) +[-1.])
         elif time_s >= self.wp_steps - self.gripper_steps:
-            full_action = np.array([0.] * 6 + list(gripper_mat[wp_idx]))
+            full_action = np.array([0.]*6 + list(gripper_mat[wp_idx]))
         else:
-            full_action = np.array(list(10. * error) + [0.] * (6 - len(state)) + [0.])
+            full_action = np.array(list(10.*error)  +[0.]*(6-len(state)) + [0.])
+
         return full_action
 
     def train(self):
@@ -83,47 +87,30 @@ class Train:
             elif self.env == 'Door' and not self.use_latch:
                 save_name = self.env + 'without_latch/' + self.run_name
         else:
-            save_name = self.env + '/' + self.object + '/' + self.run_name
+             save_name = self.env + '/' + self.object + '/' + self.run_name
 
-        # Configure environment parameters
-        env_kwargs = {
-            "env_name": self.env,
-            "robots": self.robot,
-            "has_renderer": self.render,
-            "reward_shaping": True,
-            "control_freq": 10,
-            "has_offscreen_renderer": False,
-            "use_camera_obs": False,
-            "initialization_noise": None,
-            "controller_configs": {
-                "type": "OSC_POSE",
-                "input_max": 1,
-                "input_min": -1,
-                "output_max": [0.05, 0.05, 0.05, 0.5, 0.5, 0.5],
-                "output_min": [-0.05, -0.05, -0.05, -0.5, -0.5, -0.5],
-                "kp": 150,
-                "damping_ratio": 1,
-                "impedance_mode": "fixed",
-                "kp_limits": [0, 300],
-                "damping_ratio_limits": [0, 10],
-                "position_limits": None,
-                "orientation_limits": None,
-                "uncouple_pos_ori": True,
-                "input_type": "delta",
-                "input_ref_frame": "base",
-                "interpolation": None,
-                "ramp_ratio": 0.2,
-                "gripper": {
-                    "type": "GRIP"
-                }
-            }
-        }
 
-        # Add use_latch parameter only for Door environment
-        if self.env == 'Door':
-            env_kwargs["use_latch"] = self.use_latch
+        # save_dir = 'models/' + save_name
+        # if not os.path.exists(save_dir):
+        #     print("MAKING")
+        #     os.makedirs(save_dir)
 
-        env = suite.make(**env_kwargs)
+        controller_config = load_controller_config(default_controller="OSC_POSE")
+
+        env = suite.make(
+            env_name=self.env,
+            robots=self.robot,
+            controller_configs=controller_config,
+            has_renderer=self.render,
+            reward_shaping=True,
+            control_freq=10,
+            has_offscreen_renderer=False,
+            use_camera_obs=False,
+            initialization_noise=None,
+            single_object_mode=2,
+            object_type=self.object,
+            use_latch=self.use_latch,
+        )
 
         wp_id = 1
 
@@ -148,9 +135,9 @@ class Train:
 
                 memory = MyMemory()
 
-            i_episode = i_episode % self.epoch_wp
+            i_episode = i_episode%self.epoch_wp
 
-            if np.random.rand() < 0.05 and i_episode < self.rand_reset_epoch and i_episode > 1:
+            if np.random.rand()<0.05 and i_episode<self.rand_reset_epoch and i_episode > 1:
                 agent.reset_model(np.random.randint(10))
 
             episode_reward = 0
@@ -160,8 +147,8 @@ class Train:
             traj_full = agent.traj_opt(i_episode, objs)
 
             state = self.get_state(obs)
-            traj_mat = np.reshape(traj_full, (wp_id, self.state_dim))[:, :self.state_dim - 1] + state
-            gripper_mat = np.reshape(traj_full, (wp_id, self.state_dim))[:, self.state_dim - 1:]
+            traj_mat = np.reshape(traj_full, (wp_id, self.state_dim))[:, :self.state_dim-1] + state
+            gripper_mat = np.reshape(traj_full, (wp_id, self.state_dim))[:, self.state_dim-1:]
 
             if len(memory) > self.batch_size:
                 for _ in range(100):
@@ -170,12 +157,12 @@ class Train:
 
             time_s = 0
             train_reward = 0
-            for timestep in range(wp_id * self.wp_steps):
+            for timestep in range(wp_id*self.wp_steps):
                 if self.render:
                     env.render()
 
                 state = self.get_state(obs)
-                wp_idx = timestep // 50
+                wp_idx = timestep//50
 
                 action = self.get_action(self.env, wp_idx, state, traj_mat, gripper_mat, time_s, timestep)
 
@@ -186,7 +173,7 @@ class Train:
                 obs, reward, done, _ = env.step(action)
                 episode_reward += reward
 
-                if timestep // 50 == wp_id - 1:
+                if timestep//50 == wp_id - 1:
                     train_reward += reward
 
                 total_steps += 1
@@ -200,7 +187,7 @@ class Train:
                 agent.save_model(save_name)
 
             writer.add_scalar('reward', episode_reward, i_episode)
-            tqdm.write(f"wp_id: {wp_id}, Episode: {i_episode}, Reward_full: {round(episode_reward, 2)}; Reward: {round(train_reward, 2)}, Predicted: {round(agent.get_avg_reward(traj_full), 2)}")
+            tqdm.write("wp_id: {}, Episode: {}, Reward_full: {}; Reward: {}, Predicted: {}".format(wp_id, i_episode, round(episode_reward, 2), round(train_reward, 2), round(agent.get_avg_reward(traj_full), 2)))
 
             pickle.dump(save_data, open('models/' + save_name + '/data.pkl', 'wb'))
 

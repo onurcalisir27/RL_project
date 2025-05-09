@@ -1,11 +1,13 @@
 import numpy as np
 import argparse
 import hydra
-from omegaconf import DictConfig
-from train import Train
-from eval import Evaluate
+from omegaconf import DictConfig, OmegaConf
+from typing import Dict
+from train import train
+from eval import evaluate
 
-def omegaconf_to_dict(d: DictConfig) -> dict:
+def omegaconf_to_dict(d: DictConfig)->Dict:
+    """Converts an omegaconf DictConfig to a python Dict, respecting variable interpolation."""
     ret = {}
     for k, v in d.items():
         if isinstance(v, DictConfig):
@@ -15,7 +17,7 @@ def omegaconf_to_dict(d: DictConfig) -> dict:
     return ret
 
 @hydra.main(version_base="1.2", config_name="config", config_path="./cfg")
-def main(cfg: DictConfig):
+def main(cfg=DictConfig):
     config = omegaconf_to_dict(cfg)
 
     task = config['task']['name']
@@ -25,10 +27,10 @@ def main(cfg: DictConfig):
             raise Exception('Unknown object type. \n Available objects: bread, can, milk')
 
     if config['train']:
-        Train(config)
+        train(config)
 
     if config['test']:
-        Evaluate(config)
+        evaluate(config)
 
-if __name__ == '__main__':
-    main()
+if __name__=='__main__':
+   main()

@@ -1,17 +1,96 @@
 import numpy as np
+import tensorflow as tf
+import gym
 import datetime
-from tensorboardX import SummaryWriter
 import robosuite as suite
-from robosuite.controllers import load_part_controller_config
+from robosuite.controllers import load_controller_config
 import pickle
 from tqdm import tqdm
 from scipy.spatial.transform import Rotation as R
 from scipy.optimize import minimize, LinearConstraint
 import time
-import os
-from method import Method
+import os, sys
+import random
+from models import RNetwork
 
-class Evaluate:
+class Method(object):
+    def __init__(self, state_dim, objs, wp_id, save_name, config):
+        self.state_dim = state_dim
+        self.wp_id = wp_id
+        self.best_wp = []
+        self.n_inits = 5
+        self.lr = 1e-3
+        self.hidden_size = 128
+        self.n_models = 10
+        self.models = []
+        self.learned_models = []
+
+        self.action_dim = config['task']['task']['action_space']
+
+        save_dir = 'models/' + save_name
+
+        # Load previously trained models
+        for wp_id in range(1, self.wp_id+1):
+            models = []
+            for idx in range(self.n_models):
+                critic = RNetwork(wp_id*self.state_dim + len(objs), hidden_dim=self.hidden_size)
+                # Load weights from saved model
+                critic.load_weights(save_dir + '/model_' + str(wp_id) + '_' + str(idx))
+                models.append(critic)
+            self.learned_models.append(models)
+
+        self.best_traj = self.action_dim*(np.random.rand(self.state_dim*self.wp_id) - 0.5)
+        self.best_reward = -np.inf
+        self.lincon = LinearConstraint(np.eye(self.state_dim), -self.action_dim, self.action_dim)
+
+    def traj_opt(self, i_episode, objs):
+        self.reward_idx = random.choice(range(self.n_models))
+        self.objs = tf.convert_to_tensor(objs, dtype=tf.float32)
+        self.curr_episode = i_episode
+
+        self.traj = []
+        for idx in range(1, self.wp_id+1):
+            min_cost = np.inf
+
+            self.load_model = True if idx!=self.wp_id else False
+            self.curr_wp = idx-1
+
+            for t_idx in range(self.n_inits):
+                if t_idx != 0:
+                    xi0 = np.copy(self.best_traj[self.curr_wp*self.state_dim:self.curr_wp*self.state_dim+self.state_dim]) + np.random.normal(0, 0.1, size=self.state_dim)
+                else:
+                    xi0 = np.copy(self.best_traj[self.curr_wp*self.state_dim:self.curr_wp*self.state_dim+self.state_dim])
+
+                res = minimize(self.get_cost, xi0, method='SLSQP', constraints=self.lincon, options={'eps': 1e-6, 'maxiter': 1e6})
+                if res.fun < min_cost:
+                    min_cost = res.fun
+                    self.best_wp = res.x
+
+            self.traj.append(self.best_wp)
+        return np.array(self.traj).flatten()
+
+    def set_init(self, traj, reward):
+        self.best_reward = reward
+        self.best_traj = np.copy(traj)
+
+    def get_cost(self, traj):
+        traj_tensor = tf.convert_to_tensor(traj, dtype=tf.float32)
+        traj_learnt = tf.convert_to_tensor(np.array(self.traj).flatten(), dtype=tf.float32)
+        full_traj = tf.concat([traj_learnt, traj_tensor], axis=0)
+        full_traj_with_objs = tf.concat([full_traj, self.objs], axis=0)
+        reward = self.get_reward(full_traj_with_objs)
+        return -reward
+    
+    def get_reward(self, traj):
+        loss = 0
+        models = self.learned_models[self.curr_wp]
+        for idx in range(self.n_models):
+            critic = models[idx]
+            loss += critic(tf.expand_dims(traj, 0)).numpy()[0][0]
+        return loss/self.n_models
+
+
+class evaluate:
     def __init__(self, config):
         self.config = config
         self.env = config['task']['name']
@@ -19,7 +98,7 @@ class Evaluate:
         self.render = config['render']
         self.n_inits = config['n_inits']
         self.run_name = config['run_name']
-        self.object = None if config['object'] == '' else config['object']
+        self.object = None if config['object']=='' else config['object']
 
         self.robot = config['task']['env']['robot']
         self.state_dim = config['task']['env']['state_dim']
@@ -37,12 +116,12 @@ class Evaluate:
             if self.env == 'Lift':
                 objs = obs['cube_pos']
             elif self.env == 'Stack':
-                objs = np.concatenate((obs['cubeA_pos'], obs['cubeB_pos']), axis=-1)
+                objs = np.concatenate((obs['cubeA_pos'], obs['cubeB_pos']), axis=-1) 
             elif self.env == 'NutAssembly':
                 nut = 'RoundNut'
                 objs = obs[nut + '_pos']
             elif self.env == 'PickPlace':
-                objs = obs[self.object + '_pos']
+                objs = obs[self.object+'_pos']
             elif self.env == 'Door':
                 objs = np.concatenate((obs['door_pos'], obs['handle_pos']), axis=-1)
             return obs, objs
@@ -54,17 +133,19 @@ class Evaluate:
             robot_ang = R.from_quat(obs['robot0_eef_quat']).as_euler('xyz', degrees=False)
             state = np.concatenate((robot_pos, robot_ang), axis=-1)
             return state
+
         state = obs['robot0_eef_pos']
         return state
 
     def get_action(self, env, wp_idx, state, traj_mat, gripper_mat, time_s, timestep):
         error = traj_mat[wp_idx, :] - state
         if timestep < 10:
-            full_action = np.array(list(10. * error) + [0.] * (6 - len(state)) + [-1.])
+            full_action = np.array(list(10.*error) + [0.]*(6-len(state)) +[-1.])
         elif time_s >= self.wp_steps - self.gripper_steps:
-            full_action = np.array([0.] * 6 + list(gripper_mat[wp_idx]))
+            full_action = np.array([0.]*6 + list(gripper_mat[wp_idx]))
         else:
-            full_action = np.array(list(10. * error) + [0.] * (6 - len(state)) + [0.])
+            full_action = np.array(list(10.*error)  +[0.]*(6-len(state)) + [0.])
+
         return full_action
 
     def eval(self):
@@ -77,46 +158,24 @@ class Evaluate:
             elif self.env == 'Door' and not self.use_latch:
                 save_name = self.env + 'without_latch/' + self.run_name
         else:
-            save_name = self.env + '/' + self.object + '/' + self.run_name
+             save_name = self.env + '/' + self.object + '/' + self.run_name
 
-        # Configure the controller
-        controller_config = {
-            "type": "OSC_POSITION",  # Using OSC_POSITION which is a registered part controller
-            "input_max": 1,
-            "input_min": -1,
-            "output_max": [0.05, 0.05, 0.05, 0.5, 0.5, 0.5],
-            "output_min": [-0.05, -0.05, -0.05, -0.5, -0.5, -0.5],
-            "kp": 150.,
-            "damping_ratio": 1,
-            "impedance_mode": "fixed",
-            "kp_limits": [0, 300],
-            "damping_ratio_limits": [0, 10],
-            "position_limits": None,
-            "orientation_limits": None,
-            "uncouple_pos_ori": True,
-            "control_delta": True,
-            "interpolation": None,
-            "ramp_ratio": 0.2
-        }
+        controller_config = load_controller_config(default_controller="OSC_POSE")
 
-        # Configure environment parameters
-        env_kwargs = {
-            "env_name": self.env,
-            "robots": self.robot,
-            "controller_configs": controller_config,
-            "has_renderer": self.render,
-            "reward_shaping": True,
-            "control_freq": 10,
-            "has_offscreen_renderer": False,
-            "use_camera_obs": False,
-            "initialization_noise": None,
-        }
-
-        # Add use_latch parameter only for Door environment
-        if self.env == 'Door':
-            env_kwargs["use_latch"] = self.use_latch
-
-        env = suite.make(**env_kwargs)
+        env = suite.make(
+            env_name=self.env,
+            robots=self.robot,
+            controller_configs=controller_config,
+            has_renderer=self.render,
+            reward_shaping=True,
+            control_freq=10,
+            has_offscreen_renderer=False,
+            use_camera_obs=False,
+            initialization_noise=None,
+            single_object_mode=2,
+            object_type=self.object,
+            use_latch=self.use_latch,
+        )
 
         wp_id = self.num_wp
 
@@ -128,6 +187,7 @@ class Evaluate:
 
         total_steps = 0
         for i_episode in tqdm(range(1, EPOCHS)):
+
             episode_reward = 0
             done, truncated = False, False
             obs, objs = self.reset_env(env, get_objs=True)
@@ -135,17 +195,17 @@ class Evaluate:
             traj_full = agent.traj_opt(i_episode, objs)
 
             state = self.get_state(obs)
-            traj_mat = np.reshape(traj_full, (wp_id, self.state_dim))[:, :self.state_dim - 1] + state
-            gripper_mat = np.reshape(traj_full, (wp_id, self.state_dim))[:, self.state_dim - 1:]
+            traj_mat = np.reshape(traj_full, (wp_id, self.state_dim))[:, :self.state_dim-1] + state
+            gripper_mat = np.reshape(traj_full, (wp_id, self.state_dim))[:, self.state_dim-1:]
 
             time_s = 0
             train_reward = 0
-            for timestep in range(wp_id * self.wp_steps):
+            for timestep in range(wp_id*self.wp_steps):
                 if self.render:
                     env.render()
 
                 state = self.get_state(obs)
-                wp_idx = timestep // 50
+                wp_idx = timestep//50
 
                 action = self.get_action(self.env, wp_idx, state, traj_mat, gripper_mat, time_s, timestep)
 
@@ -156,7 +216,7 @@ class Evaluate:
                 obs, reward, done, _ = env.step(action)
                 episode_reward += reward
 
-                if timestep // 50 == wp_id - 1:
+                if timestep//50 == wp_id - 1:
                     train_reward += reward
 
                 total_steps += 1

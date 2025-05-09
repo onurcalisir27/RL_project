@@ -1,4 +1,5 @@
 __pycache__
 runs
 models/Lift
-outputs/2025-05-08
+outputs/*
+.DS_Store
