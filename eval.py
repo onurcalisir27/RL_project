@@ -35,7 +35,7 @@ class Method(object):
             for idx in range(self.n_models):
                 critic = RNetwork(wp_id*self.state_dim + len(objs), hidden_dim=self.hidden_size)
                 # Load weights from saved model
-                critic.load_weights(save_dir + '/model_' + str(wp_id) + '_' + str(idx))
+                critic.load_weights(save_dir + '/model_' + str(wp_id) + '_' + str(idx) + '.weights.h5')
                 models.append(critic)
             self.learned_models.append(models)
 
