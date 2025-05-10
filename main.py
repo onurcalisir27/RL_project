@@ -5,6 +5,8 @@ from omegaconf import DictConfig, OmegaConf
 from typing import Dict
 from train import train
 from eval import evaluate
+from sac.train import TrainSAC
+from sac.eval import EvaluateSAC
 
 def omegaconf_to_dict(d: DictConfig)->Dict:
     """Converts an omegaconf DictConfig to a python Dict, respecting variable interpolation."""
@@ -26,11 +28,18 @@ def main(cfg=DictConfig):
         if object not in ['bread', 'can', 'milk']:
             raise Exception('Unknown object type. \n Available objects: bread, can, milk')
 
-    if config['train']:
-        train(config)
-
-    if config['test']:
-        evaluate(config)
+    if config['method'] == 'waypoint':
+        if config['train']:
+            train(config)
+        if config['test']:
+            evaluate(config)
+    elif config['method'] == 'sac':
+        if config['train']:
+            TrainSAC(config)
+        if config['test']:
+            EvaluateSAC(config)
+    else:
+        raise ValueError("Invalid method specified. Use 'waypoint' or 'sac'.")
 
 if __name__=='__main__':
    main()

@@ -6,19 +6,19 @@ from .utils import soft_update, hard_update
 
 class SAC:
     def __init__(self, num_inputs, action_space, args):
-        self.gamma = args.gamma
-        self.tau = args.tau
-        self.alpha = args.alpha
-        self.policy_type = args.policy
-        self.target_update_interval = args.target_update_interval
-        self.lr = args.lr
+        self.gamma = args['gamma']
+        self.tau = args['tau']
+        self.alpha = args['alpha']
+        self.policy_type = args['policy']
+        self.target_update_interval = args['target_update_interval']
+        self.lr = args['lr']
 
-        self.critic = QNetwork(num_inputs, action_space.shape[0], args.hidden_size)
+        self.critic = QNetwork(num_inputs, action_space.shape[0], args['hidden_size'])
         self.critic.compile(optimizer=tf.keras.optimizers.Adam(learning_rate=self.lr))
-        self.critic_target = QNetwork(num_inputs, action_space.shape[0], args.hidden_size)
+        self.critic_target = QNetwork(num_inputs, action_space.shape[0], args['hidden_size'])
         hard_update(self.critic_target, self.critic)
 
-        self.policy = GaussianPolicy(num_inputs, action_space.shape[0], args.hidden_size, action_space)
+        self.policy = GaussianPolicy(num_inputs, action_space.shape[0], args['hidden_size'], action_space)
         self.policy.compile(optimizer=tf.keras.optimizers.Adam(learning_rate=self.lr))
 
     def select_action(self, state, evaluate=False):
@@ -68,16 +68,16 @@ class SAC:
         if ckpt_path is None:
             ckpt_path = f"checkpoints/sac_checkpoint_{env_name}_{suffix}"
         os.makedirs(os.path.dirname(ckpt_path), exist_ok=True)
-        self.policy.save_weights(f"{ckpt_path}_policy")
-        self.critic.save_weights(f"{ckpt_path}_critic")
-        self.critic_target.save_weights(f"{ckpt_path}_critic_target")
+        self.policy.save_weights(f"{ckpt_path}_policy.weights.h5")
+        self.critic.save_weights(f"{ckpt_path}_critic.weights.h5")
+        self.critic_target.save_weights(f"{ckpt_path}_critic_target.weights.h5")
 
     def load_checkpoint(self, ckpt_path, evaluate=False):
-        self.policy.load_weights(f"{ckpt_path}_policy")
-        self.critic.load_weights(f"{ckpt_path}_critic")
-        self.critic_target.load_weights(f"{ckpt_path}_critic_target")
+        self.policy.load_weights(f"{ckpt_path}_policy.weights.h5")
+        self.critic.load_weights(f"{ckpt_path}_critic.weights.h5")
+        self.critic_target.load_weights(f"{ckpt_path}_critic_target.weights.h5")
 
     def save_model(self, save_dir):
         os.makedirs(save_dir, exist_ok=True)
-        self.policy.save_weights(os.path.join(save_dir, "actor"))
-        self.critic.save_weights(os.path.join(save_dir, "critic"))
+        self.policy.save_weights(os.path.join(save_dir, "actor.weights.h5"))
+        self.critic.save_weights(os.path.join(save_dir, "critic.weights.h5"))

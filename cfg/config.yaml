@@ -6,12 +6,12 @@ n_inits: 5
 render: False
 train: True
 test: False
-method: 'waypoint'  # Options: 'waypoint', 'sac'
+method: 'sac'  # Options: 'waypoint', 'sac'
 
 sac:
   alpha: 0.1
   num_steps: 100
-  num_episodes: 999
+  num_episodes: 200
   num_eval: 100
   start_steps: 5000
   policy: 'Gaussian'
@@ -23,7 +23,7 @@ sac:
   updates_per_step: 1
   target_update_interval: 1
   replay_size: 1000000
-  cuda: False
+  cuda: True
 
 defaults:
   - task: Lift

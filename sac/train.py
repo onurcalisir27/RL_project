@@ -71,7 +71,7 @@ class TrainSAC:
         env_action_space = gym.spaces.Box(low=-1.0, high=1.0, shape=(4,), dtype=np.float64)
         agent = SAC(len(obs['robot0_eef_pos']) + len(objs), env_action_space, self.args)
 
-        memory = ReplayMemory(self.args.replay_size)
+        memory = ReplayMemory(self.args['replay_size'])
         writer = SummaryWriter(f'runs/sac_{self.run_name}_{datetime.datetime.now().strftime("%H-%M")}')
 
         total_numsteps = 0
@@ -92,9 +92,9 @@ class TrainSAC:
                 else:
                     action = agent.select_action(state)
 
-                if len(memory) > self.args.batch_size:
-                    for _ in range(self.args.updates_per_step):
-                        critic_1_loss, critic_2_loss, policy_loss = agent.update_parameters(memory, self.args.batch_size, updates)
+                if len(memory) > self.args['batch_size']:
+                    for _ in range(self.args['updates_per_step']):
+                        critic_1_loss, critic_2_loss, policy_loss = agent.update_parameters(memory, self.args['batch_size'], updates)
                         writer.add_scalar('loss/critic_1', critic_1_loss, updates)
                         writer.add_scalar('loss/critic_2', critic_2_loss, updates)
                         writer.add_scalar('loss/policy', policy_loss, updates)
