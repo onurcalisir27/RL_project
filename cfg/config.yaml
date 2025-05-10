@@ -6,7 +6,7 @@ n_inits: 5
 render: False
 train: True
 test: False
-method: 'sac'  # Options: 'waypoint', 'sac'
+method: 'waypoint'  # Options: 'waypoint', 'sac'
 
 sac:
   alpha: 0.1
